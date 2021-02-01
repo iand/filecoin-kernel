@@ -22,6 +22,7 @@ type ActorMap interface {
 	LoadActor(addr address.Address, out cbor.Unmarshaler) (bool, error)
 	PutActor(addr address.Address, in cbor.Marshaler) error
 	DeleteActor(addr address.Address) error
+	MutateActor(addr address.Address, f func(*Actor) error) error
 	Root() (cid.Cid, error)
 }
 
@@ -33,13 +34,111 @@ type Store interface {
 }
 
 type VM struct {
-	store        Store
+	store        ActorStore
 	currentEpoch abi.ChainEpoch
 	network      Network
 	stateRoot    cid.Cid // The last committed root.
-	registry     ActorRegistry
-	actors       ActorMap // state tree
 	actorsDirty  bool
+}
+
+type Message struct {
+	Version uint64
+
+	To   address.Address
+	From address.Address
+
+	Nonce uint64
+
+	Value abi.TokenAmount
+
+	GasLimit   int64
+	GasFeeCap  abi.TokenAmount
+	GasPremium abi.TokenAmount
+
+	Method abi.MethodNum
+	Params interface{}
+}
+
+// ApplyMessage applies the message to the current state.
+func (vm *VM) ApplyMessage(ctx context.Context, msg *Message) (cbor.Marshaler, exitcode.ExitCode) {
+	// TODO: verify message values are acceptable
+
+	// TODO: get gas pricelist from network
+
+	// load actor from global state
+	fromID, ok := vm.NormalizeAddress(msg.From)
+	if !ok {
+		return nil, exitcode.SysErrSenderInvalid
+	}
+
+	fromActor, found, err := vm.GetActor(fromID)
+	if err != nil {
+		// TODO handle error
+		panic(err)
+	}
+	if !found {
+		// Execution error; sender does not exist at time of message execution.
+		return nil, exitcode.SysErrSenderInvalid
+	}
+
+	// Increment the calling actor nonce
+	if err := vm.store.MutateActor(ctx, fromID, func(a *Actor) error {
+		a.CallSeqNum++
+		return nil
+	}); err != nil {
+		// TODO handle error
+		panic(err)
+	}
+
+	// checkpoint state
+	// Even if the message fails, the following accumulated changes will be applied:
+	// - CallSeqNumber increment
+	// - sender balance withheld
+	priorRoot, err := vm.checkpoint()
+	if err != nil {
+		// TODO handle error
+		panic(err)
+	}
+
+	// send
+	// 1. build internal message
+	// 2. build invocation context
+	// 3. process the msg
+
+	topLevel := topLevelContext{
+		originatorStableAddress: fromID,
+		// this should be nonce, but we only care that it creates a unique stable address
+		originatorCallSeq:    vm.callSequence,
+		newActorAddressCount: 0,
+		statsSource:          vm.statsSource,
+		circSupply:           vm.circSupply,
+	}
+	vm.callSequence++
+
+	// build internal msg
+	imsg := InternalMessage{
+		from:   fromID,
+		to:     msg.To,
+		value:  msg.Value,
+		method: msg.Method,
+		params: msg.Params,
+	}
+
+	// Build invocation context and invoke
+	ic := newInvocationContext(vm, &topLevel, imsg, fromActor, vm.emptyObject)
+	ret, exitCode := ic.invoke()
+
+	// Roll back all state if the receipt's exit code is not ok.
+	// This is required in addition to rollback within the invocation context since top level messages can fail for
+	// more reasons than internal ones. Invocation context still needs its own rollback so actors can recover and
+	// proceed from a nested call failure.
+	if exitCode != exitcode.Ok {
+		if err := vm.rollback(priorRoot); err != nil {
+			panic(err)
+		}
+	}
+
+	return ret.inner, exitCode
 }
 
 func (vm *VM) GetActor(a address.Address) (*Actor, bool, error) {
