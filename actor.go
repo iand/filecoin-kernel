@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -11,6 +10,7 @@ import (
 	"github.com/filecoin-project/go-state-types/cbor"
 	"github.com/filecoin-project/go-state-types/rt"
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
+	"github.com/filecoin-project/specs-actors/v3/actors/builtin/exported"
 	init_ "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v3/actors/util/adt"
 	"github.com/ipfs/go-cid"
@@ -21,7 +21,26 @@ type ActorRegistry interface {
 	Lookup(cid.Cid) (rt.VMActor, error)
 }
 
+type actorMap map[cid.Cid]rt.VMActor
+
+func (m actorMap) Lookup(code cid.Cid) (rt.VMActor, error) {
+	a, found := m[code]
+	if !found {
+		return nil, fmt.Errorf("actor not found for code %q", code)
+	}
+	return a, nil
+}
+
+var builtinRegistry = actorMap{}
+
+func init() {
+	for _, ba := range exported.BuiltinActors() {
+		builtinRegistry[ba.Code()] = ba
+	}
+}
+
 // Actor represents the on-chain state of a single actor.
+// TODO: gen CBOR
 type Actor struct {
 	Code       cid.Cid // CID representing the code associated with the actor
 	Head       cid.Cid // CID of the head state object for the actor
@@ -29,25 +48,29 @@ type Actor struct {
 	Balance    big.Int // Token balance of the actor
 }
 
-// TODO: gen this stub
-func (a *Actor) MarshalCBOR(w io.Writer) error {
-	return nil
-}
-
-// TODO: gen this stub
-func (a *Actor) UnmarshalCBOR(r io.Reader) error {
-	return nil
-}
-
-type xActorStore struct {
+type ActorStore struct {
 	states    ipldcbor.IpldStore // off-chain states
 	actors    *adt.Map           // on-chain actor representations
 	registry  ActorRegistry      // registry of actor types
 	stateRoot cid.Cid
 }
 
+func NewActorStore(istore ipldcbor.IpldStore, stateRoot cid.Cid, registry ActorRegistry) (*ActorStore, error) {
+	actors, err := adt.AsMap(adt.WrapStore(context.TODO(), istore), stateRoot, builtin.DefaultHamtBitwidth)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ActorStore{
+		states:    istore,
+		actors:    actors,
+		stateRoot: stateRoot,
+		registry:  registry,
+	}, nil
+}
+
 // SetActorState stores the state and updates the on-chain state of the addressed actor
-func (as *xActorStore) SetActorState(ctx context.Context, addr address.Address, state cbor.Marshaler) error {
+func (as *ActorStore) SetActorState(ctx context.Context, addr address.Address, state cbor.Marshaler) error {
 	if addr.Protocol() != address.ID {
 		return fmt.Errorf("address must use ID protocol")
 	}
@@ -62,7 +85,7 @@ func (as *xActorStore) SetActorState(ctx context.Context, addr address.Address, 
 	})
 }
 
-func (as *xActorStore) LoadActorState(ctx context.Context, addr address.Address, state cbor.Unmarshaler) error {
+func (as *ActorStore) LoadActorState(ctx context.Context, addr address.Address, state cbor.Unmarshaler) error {
 	if addr.Protocol() != address.ID {
 		return fmt.Errorf("address must use ID protocol")
 	}
@@ -79,7 +102,7 @@ func (as *xActorStore) LoadActorState(ctx context.Context, addr address.Address,
 	return as.states.Get(ctx, act.Head, state)
 }
 
-func (as *xActorStore) GetActor(ctx context.Context, addr address.Address) (*Actor, bool, error) {
+func (as *ActorStore) GetActor(ctx context.Context, addr address.Address) (*Actor, bool, error) {
 	if addr.Protocol() != address.ID {
 		return nil, false, fmt.Errorf("address must use ID protocol")
 	}
@@ -88,7 +111,7 @@ func (as *xActorStore) GetActor(ctx context.Context, addr address.Address) (*Act
 	return &act, found, err
 }
 
-func (as *xActorStore) SetActor(ctx context.Context, addr address.Address, act *Actor) error {
+func (as *ActorStore) SetActor(ctx context.Context, addr address.Address, act *Actor) error {
 	if addr.Protocol() != address.ID {
 		return fmt.Errorf("address must use ID protocol")
 	}
@@ -98,7 +121,7 @@ func (as *xActorStore) SetActor(ctx context.Context, addr address.Address, act *
 	return nil
 }
 
-func (as *xActorStore) MutateActor(ctx context.Context, addr address.Address, f func(*Actor) error) error {
+func (as *ActorStore) MutateActor(ctx context.Context, addr address.Address, f func(*Actor) error) error {
 	if addr.Protocol() != address.ID {
 		return fmt.Errorf("address must use ID protocol")
 	}
@@ -117,11 +140,11 @@ func (as *xActorStore) MutateActor(ctx context.Context, addr address.Address, f 
 	return as.actors.Put(abi.AddrKey(addr), &act)
 }
 
-func (as *xActorStore) DeleteActor(ctx context.Context, addr address.Address) error {
+func (as *ActorStore) DeleteActor(ctx context.Context, addr address.Address) error {
 	panic("xActorStore.DeleteActor not implemented")
 }
 
-func (as *xActorStore) NormalizeAddress(addr address.Address) (address.Address, bool) {
+func (as *ActorStore) NormalizeAddress(addr address.Address) (address.Address, bool) {
 	// short-circuit if the address is already an ID address
 	if addr.Protocol() == address.ID {
 		return addr, true
@@ -140,7 +163,7 @@ func (as *xActorStore) NormalizeAddress(addr address.Address) (address.Address, 
 	return idAddr, found
 }
 
-func (as *xActorStore) Checkpoint() (cid.Cid, error) {
+func (as *ActorStore) Checkpoint() (cid.Cid, error) {
 	// flush
 	root, err := as.actors.Root()
 	if err != nil {
@@ -150,7 +173,7 @@ func (as *xActorStore) Checkpoint() (cid.Cid, error) {
 	return root, nil
 }
 
-func (as *xActorStore) Rollback(root cid.Cid) error {
+func (as *ActorStore) Rollback(root cid.Cid) error {
 	actors, err := adt.AsMap(adt.WrapStore(context.TODO(), as.states), root, builtin.DefaultHamtBitwidth)
 	if err != nil {
 		return err
@@ -161,6 +184,6 @@ func (as *xActorStore) Rollback(root cid.Cid) error {
 	return nil
 }
 
-func (as *xActorStore) GetActorImpl(ctx context.Context, code cid.Cid) (rt.VMActor, error) {
+func (as *ActorStore) GetActorImpl(ctx context.Context, code cid.Cid) (rt.VMActor, error) {
 	return as.registry.Lookup(code)
 }

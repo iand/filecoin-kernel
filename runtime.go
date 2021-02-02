@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"reflect"
 	"runtime/debug"
 
@@ -28,14 +29,9 @@ import (
 	"github.com/filecoin-project/specs-actors/v3/support/testing"
 )
 
-func IsSingletonActor(code cid.Cid) bool {
-	// TODO: implement
-	return false
-}
-
-func IsBuiltinActor(code cid.Cid) bool {
-	// TODO: implement
-	return false
+func IsSingletonActor(act rt.VMActor) bool {
+	s, ok := act.(interface{ IsSingleton() bool })
+	return ok && s.IsSingleton()
 }
 
 type InternalMessage struct {
@@ -76,7 +72,7 @@ var EmptyObjectCid cid.Cid
 
 // Context for an individual message invocation, including inter-actor sends.
 type invocationContext struct {
-	as                *xActorStore
+	as                *ActorStore
 	topLevel          *topLevelContext
 	msg               InternalMessage // The message being processed
 	fromActor         *Actor          // The immediate calling actor
@@ -96,7 +92,7 @@ type topLevelContext struct {
 	currentEpoch            abi.ChainEpoch
 }
 
-func newInvocationContext(as *xActorStore, topLevel *topLevelContext, msg InternalMessage, fromActor *Actor, emptyObject cid.Cid) invocationContext {
+func newInvocationContext(as *ActorStore, topLevel *topLevelContext, msg InternalMessage, fromActor *Actor, emptyObject cid.Cid) invocationContext {
 	// Note: the toActor and stateHandle are loaded during the `invoke()`
 	return invocationContext{
 		as:                as,
@@ -175,14 +171,18 @@ func (ic *invocationContext) invoke() (ret returnWrapper, errcode exitcode.ExitC
 	}
 
 	// 5. load target actor code
+	log.Printf("load target actor code=%s", builtin.ActorNameByCode(ic.toActor.Code))
 	actorImpl, err := ic.as.GetActorImpl(context.TODO(), ic.toActor.Code)
 	if err != nil {
+		log.Printf("load target actor error=%v code=%s", err, builtin.ActorNameByCode(ic.toActor.Code))
 		ic.Abortf(exitcode.SysErrInvalidMethod, "could not find actor implementation")
 	}
 
 	// dispatch
+	log.Printf("dispatch code=%s method=%d", builtin.ActorNameByCode(ic.toActor.Code), ic.msg.method)
 	out, err := ic.dispatch(actorImpl, ic.msg.method, ic.msg.params)
 	if err != nil {
+		log.Printf("dispatch error=%v code=%s method=%d", err, builtin.ActorNameByCode(ic.toActor.Code), ic.msg.method)
 		ic.Abortf(exitcode.SysErrInvalidMethod, "could not dispatch method")
 	}
 
@@ -195,6 +195,7 @@ func (ic *invocationContext) invoke() (ret returnWrapper, errcode exitcode.ExitC
 			ic.Abortf(exitcode.SysErrorIllegalActor, "Returned value is not a CBORMarshaler")
 		}
 	}
+	log.Printf("dispatch result out=%T", out)
 	ret = returnWrapper{inner: marsh}
 
 	// 3. success!
@@ -306,39 +307,6 @@ func (ic *invocationContext) transfer(debitFrom address.Address, creditTo addres
 	return toActor, fromActor
 }
 
-// func (ic *invocationContext) loadState(obj cbor.Unmarshaler) cid.Cid {
-// 	// The actor must be loaded from store every time since the state may have changed via a different state handle
-// 	// (e.g. in a recursive call).
-// 	actr := ic.loadActor()
-// 	c := actr.Head
-// 	if !c.Defined() {
-// 		ic.Abortf(exitcode.SysErrorIllegalActor, "failed to load undefined state, must construct first")
-// 	}
-// 	err := ic.vm.store.Get(context.TODO(), c, obj)
-// 	if err != nil {
-// 		panic(errors.Wrapf(err, "failed to load state for actor %s, CID %s", ic.msg.to, c))
-// 	}
-// 	return c
-// }
-
-// func (ic *invocationContext) loadActor() *Actor {
-// 	actr, found, err := ic.vm.GetActor(ic.msg.to)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	if !found {
-// 		panic(fmt.Errorf("failed to find actor %s for state", ic.msg.to))
-// 	}
-// 	return actr
-// }
-
-// func (ic *invocationContext) storeActor(actr *Actor) {
-// 	err := ic.vm.setActor(context.TODO(), ic.msg.to, actr)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// }
-
 /////////////////////////////////////////////
 //          Runtime methods
 /////////////////////////////////////////////
@@ -347,13 +315,17 @@ var _ runtime.Runtime = (*invocationContext)(nil)
 
 // Store implements runtime.Runtime.
 func (ic *invocationContext) StoreGet(c cid.Cid, o cbor.Unmarshaler) bool {
-	sw := &storeWrapper{s: adt.WrapStore(context.TODO(), ic.as.states), rt: ic}
-	return sw.StoreGet(c, o)
+	err := ic.as.states.Get(context.TODO(), c, o)
+	// TODO: we assume all errors are not found errors (bad assumption, but ok for testing)
+	return err == nil
 }
 
-func (ic *invocationContext) StorePut(x cbor.Marshaler) cid.Cid {
-	sw := &storeWrapper{s: adt.WrapStore(context.TODO(), ic.as.states), rt: ic}
-	return sw.StorePut(x)
+func (ic *invocationContext) StorePut(o cbor.Marshaler) cid.Cid {
+	c, err := ic.as.states.Put(context.TODO(), o)
+	if err != nil {
+		ic.Abortf(exitcode.ErrIllegalState, "could not put object in store")
+	}
+	return c
 }
 
 // These methods implement
@@ -497,6 +469,7 @@ func (ic *invocationContext) ValidateImmediateCallerType(types ...cid.Cid) {
 }
 
 func (ic *invocationContext) Abortf(errExitCode exitcode.ExitCode, msg string, args ...interface{}) {
+	log.Printf("Abortf errExitCode=%d msg=%s", errExitCode, fmt.Sprintf(msg, args...))
 	panic(abort{errExitCode, fmt.Sprintf(msg, args...)})
 }
 
@@ -566,11 +539,12 @@ func (ic *invocationContext) Send(toAddr address.Address, methodNum abi.MethodNu
 
 // CreateActor implements runtime.ExtendedInvocationContext.
 func (ic *invocationContext) CreateActor(codeID cid.Cid, addr address.Address) {
-	if !IsBuiltinActor(codeID) {
+	act, err := ic.as.GetActorImpl(context.TODO(), codeID)
+	if err != nil {
 		ic.Abortf(exitcode.SysErrorIllegalArgument, "Can only create built-in actors.")
 	}
 
-	if IsSingletonActor(codeID) {
+	if IsSingletonActor(act) {
 		ic.Abortf(exitcode.SysErrorIllegalArgument, "Can only have one instance of singleton actors.")
 	}
 
@@ -650,9 +624,14 @@ func (r returnWrapper) Into(o cbor.Unmarshaler) error {
 	}
 	b := bytes.Buffer{}
 	if err := r.inner.MarshalCBOR(&b); err != nil {
+		log.Printf("Into MarshalCBOR error=%v o=%T", err, o)
 		return err
 	}
-	return o.UnmarshalCBOR(&b)
+	err := o.UnmarshalCBOR(&b)
+	if err != nil {
+		log.Printf("Into UnmarshalCBOR error=%v r=%T o=%T b.Len=%d", err, r, o, b.Len())
+	}
+	return err
 }
 
 /////////////////////////////////////////////
@@ -710,33 +689,6 @@ func (s fakeSyscalls) VerifyConsensusFault(_, _, _ []byte) (*runtime.ConsensusFa
 /////////////////////////////////////////////
 
 func fakeTraceSpanEnd() {
-}
-
-/////////////////////////////////////////////
-//          storeWrapper
-/////////////////////////////////////////////
-
-type aborter interface {
-	Abortf(errExitCode exitcode.ExitCode, msg string, args ...interface{})
-}
-
-type storeWrapper struct {
-	s  adt.Store
-	rt aborter
-}
-
-func (s storeWrapper) StoreGet(c cid.Cid, o cbor.Unmarshaler) bool {
-	err := s.s.Get(context.TODO(), c, o)
-	// assume all errors are not found errors (bad assumption, but ok for testing)
-	return err == nil
-}
-
-func (s storeWrapper) StorePut(x cbor.Marshaler) cid.Cid {
-	c, err := s.s.Put(context.TODO(), x)
-	if err != nil {
-		s.rt.Abortf(exitcode.ErrIllegalState, "could not put object in store")
-	}
-	return c
 }
 
 // resolveTarget loads an actor and returns its ActorID address.
@@ -849,6 +801,7 @@ func (ic *invocationContext) replace(obj cbor.Marshaler) cid.Cid {
 	return c
 }
 
+// loadState loads the state of the actor the message is being sent to
 func (ic *invocationContext) loadState(obj cbor.Unmarshaler) cid.Cid {
 	// The actor must be loaded from store every time since the state may have changed via a different state handle
 	// (e.g. in a recursive call).

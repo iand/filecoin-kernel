@@ -40,11 +40,25 @@ type Message struct {
 }
 
 type VM struct {
-	store        xActorStore
+	store        *ActorStore
 	currentEpoch abi.ChainEpoch
 	network      Network
 
 	emptyObject cid.Cid
+}
+
+func NewVM(store *ActorStore, epoch abi.ChainEpoch, network Network) (*VM, error) {
+	emptyObject, err := store.states.Put(context.TODO(), []struct{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	return &VM{
+		store:        store,
+		currentEpoch: epoch,
+		network:      network,
+		emptyObject:  emptyObject,
+	}, nil
 }
 
 // ApplyMessage applies the message to the current state.
@@ -115,7 +129,7 @@ func (vm *VM) ApplyMessage(ctx context.Context, msg *Message) (cbor.Marshaler, e
 	}
 
 	// Build invocation context and invoke
-	ic := newInvocationContext(&vm.store, &topLevel, imsg, fromActor, vm.emptyObject)
+	ic := newInvocationContext(vm.store, &topLevel, imsg, fromActor, vm.emptyObject)
 	ret, exitCode := ic.invoke()
 
 	// Roll back all state if the receipt's exit code is not ok.
