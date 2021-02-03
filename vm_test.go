@@ -145,6 +145,57 @@ func initializeActor(ctx context.Context, t testing.TB, as *ActorStore, state cb
 	require.NoError(t, err)
 }
 
+func exitCodeStr(code exitcode.ExitCode) string {
+	switch code {
+	case exitcode.Ok:
+		return "Ok"
+	case exitcode.SysErrSenderInvalid:
+		return "SysErrSenderInvalid"
+	case exitcode.SysErrSenderStateInvalid:
+		return "SysErrSenderStateInvalid"
+	case exitcode.SysErrInvalidMethod:
+		return "SysErrInvalidMethod"
+	case exitcode.SysErrReserved1:
+		return "SysErrReserved1"
+	case exitcode.SysErrInvalidReceiver:
+		return "SysErrInvalidReceiver"
+	case exitcode.SysErrInsufficientFunds:
+		return "SysErrInsufficientFunds"
+	case exitcode.SysErrOutOfGas:
+		return "SysErrOutOfGas"
+	case exitcode.SysErrForbidden:
+		return "SysErrForbidden"
+	case exitcode.SysErrorIllegalActor:
+		return "SysErrorIllegalActor"
+	case exitcode.SysErrorIllegalArgument:
+		return "SysErrorIllegalArgument"
+	case exitcode.SysErrReserved2:
+		return "SysErrReserved2"
+	case exitcode.SysErrReserved3:
+		return "SysErrReserved3"
+	case exitcode.SysErrReserved4:
+		return "SysErrReserved4"
+	case exitcode.SysErrReserved5:
+		return "SysErrReserved5"
+	case exitcode.SysErrReserved6:
+		return "SysErrReserved6"
+	case exitcode.ErrIllegalArgument:
+		return "ErrIllegalArgument"
+	case exitcode.ErrNotFound:
+		return "ErrNotFound"
+	case exitcode.ErrForbidden:
+		return "ErrForbidden"
+	case exitcode.ErrInsufficientFunds:
+		return "ErrInsufficientFunds"
+	case exitcode.ErrIllegalState:
+		return "ErrIllegalState"
+	case exitcode.ErrSerialization:
+		return "ErrSerialization"
+	default:
+		return code.String()
+	}
+}
+
 func TestCreateMiner(t *testing.T) {
 	ctx := context.Background()
 	vm := NewVMWithSingletons(ctx, t, ipld.NewADTStore(ctx))
@@ -204,53 +255,83 @@ func TestCreateMiner(t *testing.T) {
 	// }.Matches(t, v.Invocations()[0])
 }
 
-func exitCodeStr(code exitcode.ExitCode) string {
-	switch code {
-	case exitcode.Ok:
-		return "Ok"
-	case exitcode.SysErrSenderInvalid:
-		return "SysErrSenderInvalid"
-	case exitcode.SysErrSenderStateInvalid:
-		return "SysErrSenderStateInvalid"
-	case exitcode.SysErrInvalidMethod:
-		return "SysErrInvalidMethod"
-	case exitcode.SysErrReserved1:
-		return "SysErrReserved1"
-	case exitcode.SysErrInvalidReceiver:
-		return "SysErrInvalidReceiver"
-	case exitcode.SysErrInsufficientFunds:
-		return "SysErrInsufficientFunds"
-	case exitcode.SysErrOutOfGas:
-		return "SysErrOutOfGas"
-	case exitcode.SysErrForbidden:
-		return "SysErrForbidden"
-	case exitcode.SysErrorIllegalActor:
-		return "SysErrorIllegalActor"
-	case exitcode.SysErrorIllegalArgument:
-		return "SysErrorIllegalArgument"
-	case exitcode.SysErrReserved2:
-		return "SysErrReserved2"
-	case exitcode.SysErrReserved3:
-		return "SysErrReserved3"
-	case exitcode.SysErrReserved4:
-		return "SysErrReserved4"
-	case exitcode.SysErrReserved5:
-		return "SysErrReserved5"
-	case exitcode.SysErrReserved6:
-		return "SysErrReserved6"
-	case exitcode.ErrIllegalArgument:
-		return "ErrIllegalArgument"
-	case exitcode.ErrNotFound:
-		return "ErrNotFound"
-	case exitcode.ErrForbidden:
-		return "ErrForbidden"
-	case exitcode.ErrInsufficientFunds:
-		return "ErrInsufficientFunds"
-	case exitcode.ErrIllegalState:
-		return "ErrIllegalState"
-	case exitcode.ErrSerialization:
-		return "ErrSerialization"
-	default:
-		return code.String()
+func TestOnEpochTickEnd(t *testing.T) {
+	ctx := context.Background()
+	vm := NewVMWithSingletons(ctx, t, ipld.NewADTStore(ctx))
+	addrs := CreateAccounts(ctx, t, vm.store, 1, big.Mul(big.NewInt(10_000), big.NewInt(1e18)), 93837778)
+
+	msg := &Message{
+		From:   addrs[0],
+		To:     builtin.StoragePowerActorAddr,
+		Value:  big.NewInt(1e10),
+		Method: builtin.MethodsPower.CreateMiner,
+		Params: &power.CreateMinerParams{
+			Owner: addrs[0], Worker: addrs[0],
+			WindowPoStProofType: abi.RegisteredPoStProof_StackedDrgWindow32GiBV1,
+			Peer:                abi.PeerID("pid"),
+		},
 	}
+
+	ret, code := vm.ApplyMessage(ctx, msg)
+	require.Equal(t, exitcode.Ok, code, fmt.Sprintf("exit code %d=%s", code, exitCodeStr(code)))
+
+	createRet, ok := ret.(*power.CreateMinerReturn)
+	require.True(t, ok)
+
+	_ = createRet
+	/*
+		// find epoch of miner's next cron task (4 levels deep, first message each level)
+		cronParams := vm.ParamsForInvocation(t, v, 0, 0, 0, 0)
+		cronConfig, ok := cronParams.(*power.EnrollCronEventParams)
+		require.True(t, ok)
+
+		// create new vm at epoch 1 less than epoch requested by miner
+		v, err := v.WithEpoch(cronConfig.EventEpoch - 1)
+		require.NoError(t, err)
+
+		// run cron and expect a call to miner and a call to update reward actor parameters
+		vm.ApplyOk(t, v, builtin.CronActorAddr, builtin.StoragePowerActorAddr, big.Zero(), builtin.MethodsPower.OnEpochTickEnd, abi.Empty)
+
+		// expect miner call to be missing
+		vm.ExpectInvocation{
+			// Original send to storage power actor
+			To:     builtin.StoragePowerActorAddr,
+			Method: builtin.MethodsPower.OnEpochTickEnd,
+			SubInvocations: []vm.ExpectInvocation{{
+				// expect call to reward to update kpi
+				To:     builtin.RewardActorAddr,
+				Method: builtin.MethodsReward.UpdateNetworkKPI,
+				From:   builtin.StoragePowerActorAddr,
+			}},
+		}.Matches(t, v.Invocations()[0])
+
+		// create new vm at cron epoch with existing state
+		v, err = v.WithEpoch(cronConfig.EventEpoch)
+		require.NoError(t, err)
+
+		// run cron and expect a call to miner and a call to update reward actor parameters
+		vm.ApplyOk(t, v, builtin.CronActorAddr, builtin.StoragePowerActorAddr, big.Zero(), builtin.MethodsPower.OnEpochTickEnd, abi.Empty)
+
+		// expect call to miner
+		vm.ExpectInvocation{
+			// Original send to storage power actor
+			To:     builtin.StoragePowerActorAddr,
+			Method: builtin.MethodsPower.OnEpochTickEnd,
+			SubInvocations: []vm.ExpectInvocation{{
+
+				// expect call back to miner that was set up in create miner
+				To:     minerAddrs.IDAddress,
+				Method: builtin.MethodsMiner.OnDeferredCronEvent,
+				From:   builtin.StoragePowerActorAddr,
+				Value:  vm.ExpectAttoFil(big.Zero()),
+				Params: vm.ExpectBytes(cronConfig.Payload),
+			}, {
+
+				// expect call to reward to update kpi
+				To:     builtin.RewardActorAddr,
+				Method: builtin.MethodsReward.UpdateNetworkKPI,
+				From:   builtin.StoragePowerActorAddr,
+			}},
+		}.Matches(t, v.Invocations()[0])
+	*/
 }
