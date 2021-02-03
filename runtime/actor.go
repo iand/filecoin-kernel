@@ -17,6 +17,8 @@ import (
 	ipldcbor "github.com/ipfs/go-ipld-cbor"
 )
 
+//go:generate go run gen.go
+
 type ActorRegistry interface {
 	Lookup(cid.Cid) (rt.VMActor, error)
 }
@@ -40,7 +42,6 @@ func init() {
 }
 
 // Actor represents the on-chain state of a single actor.
-// TODO: gen CBOR
 type Actor struct {
 	Code       cid.Cid // CID representing the code associated with the actor
 	Head       cid.Cid // CID of the head state object for the actor

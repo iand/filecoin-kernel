@@ -28,10 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	FIL          = big.NewInt(1e18)
-	VerifregRoot address.Address
-)
+var VerifregRoot address.Address
 
 func init() {
 	var err error
