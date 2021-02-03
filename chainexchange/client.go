@@ -187,11 +187,8 @@ func (c *Client) sendRequestToPeer(ctx context.Context, peer peer.ID, req *Reque
 	switch chosenProtocol {
 	case BlockSyncProtocolID, ChainExchangeProtocolID:
 		var resv1 Response
-		err = cborutil.ReadCborRPC(
-			bufio.NewReader(stream),
-			&resv1)
+		err = cborutil.ReadCborRPC(bufio.NewReader(stream), &resv1)
 		if err != nil {
-			// c.peerTracker.logFailure(peer, time.Since(connectionStart), req.Length)
 			return nil, fmt.Errorf("failed to read chainxchg response: %w", err)
 		}
 
@@ -206,9 +203,6 @@ func (c *Client) sendRequestToPeer(ctx context.Context, peer peer.ID, req *Reque
 		}
 	}
 
-	// c.peerTracker.logSuccess(peer, time.Since(connectionStart), uint64(len(resChain)))
-	// FIXME: We should really log a success only after we validate the response.
-	//  It might be a bit hard to do.
 	return &res, nil
 }
 
