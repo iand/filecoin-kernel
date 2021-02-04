@@ -26,7 +26,6 @@ type HelloMessage struct {
 }
 
 type Request struct {
-	Host          host.Host
 	PeerID        peer.ID
 	Message       HelloMessage
 	ReadDeadline  time.Time
@@ -48,16 +47,18 @@ type ReceivedHello struct {
 	Arrived time.Time
 }
 
-func Send(ctx context.Context, req *Request) (*Response, error) {
-	s, err := req.Host.NewStream(ctx, req.PeerID, ProtocolID)
+func Send(ctx context.Context, h host.Host, req *Request) (*Response, error) {
+	s, err := h.NewStream(ctx, req.PeerID, ProtocolID)
 	if err != nil {
 		return nil, fmt.Errorf("new stream: %w", err)
 	}
+	defer s.Close()
 
 	_ = s.SetWriteDeadline(req.WriteDeadline)
 	if err := cborutil.WriteCborRPC(s, req.Message); err != nil {
 		return nil, fmt.Errorf("write to peer: %w", err)
 	}
+	_ = s.SetWriteDeadline(time.Time{})
 
 	_ = s.SetReadDeadline(req.ReadDeadline)
 	var resp Response

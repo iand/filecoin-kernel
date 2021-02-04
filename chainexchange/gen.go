@@ -15,8 +15,8 @@ func main() {
 	err := gen.WriteTupleEncodersToFile("cbor_gen.go", "chainexchange",
 		chainexchange.BSTipSet{},
 		chainexchange.CompactedMessages{},
-		chainexchange.Request{},
-		chainexchange.Response{},
+		chainexchange.SyncMessage{},
+		chainexchange.ChainMessage{},
 	)
 	if err != nil {
 		fmt.Println(err)

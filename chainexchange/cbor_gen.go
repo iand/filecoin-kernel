@@ -403,14 +403,14 @@ func (t *CompactedMessages) UnmarshalCBOR(r io.Reader) error {
 	return nil
 }
 
-var lengthBufRequest = []byte{131}
+var lengthBufSyncMessage = []byte{131}
 
-func (t *Request) MarshalCBOR(w io.Writer) error {
+func (t *SyncMessage) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufRequest); err != nil {
+	if _, err := w.Write(lengthBufSyncMessage); err != nil {
 		return err
 	}
 
@@ -445,8 +445,8 @@ func (t *Request) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Request) UnmarshalCBOR(r io.Reader) error {
-	*t = Request{}
+func (t *SyncMessage) UnmarshalCBOR(r io.Reader) error {
+	*t = SyncMessage{}
 
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
@@ -522,20 +522,20 @@ func (t *Request) UnmarshalCBOR(r io.Reader) error {
 	return nil
 }
 
-var lengthBufResponse = []byte{131}
+var lengthBufChainMessage = []byte{131}
 
-func (t *Response) MarshalCBOR(w io.Writer) error {
+func (t *ChainMessage) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufResponse); err != nil {
+	if _, err := w.Write(lengthBufChainMessage); err != nil {
 		return err
 	}
 
 	scratch := make([]byte, 9)
 
-	// t.Status (chainexchange.status) (uint64)
+	// t.Status (chainexchange.Status) (uint64)
 
 	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.Status)); err != nil {
 		return err
@@ -569,8 +569,8 @@ func (t *Response) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *Response) UnmarshalCBOR(r io.Reader) error {
-	*t = Response{}
+func (t *ChainMessage) UnmarshalCBOR(r io.Reader) error {
+	*t = ChainMessage{}
 
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
@@ -587,7 +587,7 @@ func (t *Response) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.Status (chainexchange.status) (uint64)
+	// t.Status (chainexchange.Status) (uint64)
 
 	{
 
@@ -598,7 +598,7 @@ func (t *Response) UnmarshalCBOR(r io.Reader) error {
 		if maj != cbg.MajUnsignedInt {
 			return fmt.Errorf("wrong type for uint64 field")
 		}
-		t.Status = status(extra)
+		t.Status = Status(extra)
 
 	}
 	// t.ErrorMessage (string) (string)
