@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/filecoin-project/go-state-types/big"
+	"github.com/go-logr/logr"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-pubsub"
@@ -25,12 +27,7 @@ func TopicName(ntwk networks.Network) string {
 	return "/fil/blocks/" + ntwk.Name()
 }
 
-// ErrorLogger is the subset of the logr.Logger interface needed for reporting errors
-type ErrorLogger interface {
-	Error(err error, msg string, keysAndValues ...interface{})
-}
-
-func NewSubscription(ps *pubsub.PubSub, ntwk networks.Network, logger ErrorLogger) (*pubsub.Subscription, error) {
+func NewSubscription(ps *pubsub.PubSub, ntwk networks.Network) (*pubsub.Subscription, error) {
 	topicName := TopicName(ntwk)
 
 	topic, err := ps.Join(topicName)
@@ -39,8 +36,7 @@ func NewSubscription(ps *pubsub.PubSub, ntwk networks.Network, logger ErrorLogge
 	}
 
 	v := &BlockValidator{
-		logger: logger,
-		ntwk:   ntwk,
+		ntwk: ntwk,
 	}
 
 	if err := ps.RegisterTopicValidator(topicName, v.Validate); err != nil {
@@ -56,19 +52,18 @@ func NewSubscription(ps *pubsub.PubSub, ntwk networks.Network, logger ErrorLogge
 }
 
 type BlockValidator struct {
-	logger ErrorLogger
-	ntwk   networks.Network
+	ntwk networks.Network
 }
 
 func (v *BlockValidator) Validate(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	var bm BlockMessage
 	if err := bm.UnmarshalCBOR(bytes.NewReader(msg.GetData())); err != nil {
-		v.logger.Error(err, "failed to decode block during validation")
+		logr.FromContextOrDiscard(ctx).Error(err, "failed to decode block during validation", "from", pid)
 		return pubsub.ValidationReject
 	}
 
-	if err := v.validateBlock(ctx, pid, &bm); err != nil {
-		v.logger.Error(err, "block failed validation")
+	if err := v.validateBlockSyntax(ctx, pid, &bm); err != nil {
+		logr.FromContextOrDiscard(ctx).Error(err, "block failed validation", "from", pid)
 		return pubsub.ValidationReject
 	}
 
@@ -76,17 +71,25 @@ func (v *BlockValidator) Validate(ctx context.Context, pid peer.ID, msg *pubsub.
 	return pubsub.ValidationAccept
 }
 
-func (v *BlockValidator) validateBlock(ctx context.Context, pid peer.ID, bm *BlockMessage) error {
-	// Basic validation
-	// TODO: more validation
+func (v *BlockValidator) validateBlockSyntax(ctx context.Context, pid peer.ID, bm *BlockMessage) error {
+	// Light syntax validation following https://spec.filecoin.io/#section-systems.filecoin_blockchain.struct.block.block-syntax-validation
+	// Only steps that don't require access to block store
+	// TODO: complete validation steps
 
 	if len(bm.BlsMessages)+len(bm.SecpkMessages) > v.ntwk.BlockMessageLimit() {
 		return fmt.Errorf("too many messages")
 	}
 
-	// make sure we have a signature
 	if bm.Header.BlockSig == nil {
 		return fmt.Errorf("missing signature")
+	}
+
+	if bm.Header.ParentWeight.LessThan(big.Zero()) {
+		return fmt.Errorf("negative parent weight")
+	}
+
+	if bm.Header.Height < 0 {
+		return fmt.Errorf("negative height")
 	}
 
 	return nil

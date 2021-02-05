@@ -55,7 +55,7 @@ func (c *Client) GetBlocks(ctx context.Context, tsk []cid.Cid, count int) ([]*ch
 	return validRes.tipsets, nil
 }
 
-func (c *Client) GetFullTipSet(ctx context.Context, tsk []cid.Cid) (*FullTipSet, error) {
+func (c *Client) GetFullTipSet(ctx context.Context, tsk []cid.Cid) (*chain.FullTipSet, error) {
 	req := &SyncMessage{
 		Head:    tsk,
 		Length:  1,
@@ -344,7 +344,7 @@ type validatedResponse struct {
 
 // Decompress messages and form full tipsets with them. The headers
 // need to have been requested as well.
-func (res *validatedResponse) toFullTipSets() []*FullTipSet {
+func (res *validatedResponse) toFullTipSets() []*chain.FullTipSet {
 	if len(res.tipsets) == 0 || len(res.tipsets) != len(res.messages) {
 		// This decompression can only be done if both headers and
 		// messages are returned in the response. (The second check
@@ -352,12 +352,12 @@ func (res *validatedResponse) toFullTipSets() []*FullTipSet {
 		// added here just for completeness.)
 		return nil
 	}
-	ftsList := make([]*FullTipSet, len(res.tipsets))
+	ftsList := make([]*chain.FullTipSet, len(res.tipsets))
 	for tipsetIdx := range res.tipsets {
-		fts := &FullTipSet{} // FIXME: We should use the `NewFullTipSet` API.
+		fts := &chain.FullTipSet{} // FIXME: We should use the `NewFullTipSet` API.
 		msgs := res.messages[tipsetIdx]
 		for blockIdx, b := range res.tipsets[tipsetIdx].Blocks {
-			fb := &FullBlock{
+			fb := &chain.FullBlock{
 				Header: b,
 			}
 			for _, mi := range msgs.BlsIncludes[blockIdx] {
@@ -391,17 +391,6 @@ func StatusToError(msg *ChainMessage) error {
 	default:
 		return fmt.Errorf("unrecognized response code: %d", msg.Status)
 	}
-}
-
-// FullTipSet is an expanded version of the TipSet that contains all the blocks and messages
-type FullTipSet struct {
-	Blocks []*FullBlock
-}
-
-type FullBlock struct {
-	Header        *chain.BlockHeader
-	BlsMessages   []*chain.Message
-	SecpkMessages []*chain.SignedMessage
 }
 
 type CompactedMessages struct {

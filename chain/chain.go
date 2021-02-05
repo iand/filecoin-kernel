@@ -11,6 +11,7 @@ import (
 	"github.com/filecoin-project/go-state-types/crypto"
 	proof3 "github.com/filecoin-project/specs-actors/v3/actors/runtime/proof"
 	"github.com/minio/blake2b-simd"
+	mh "github.com/multiformats/go-multihash"
 
 	"github.com/ipfs/go-cid"
 )
@@ -72,7 +73,17 @@ func (bh *BlockHeader) Cid() (cid.Cid, error) {
 	return c, nil
 }
 
-func DecodeBlock(b []byte) (*BlockHeader, error) {
+type FullTipSet struct {
+	Blocks []*FullBlock
+}
+
+type FullBlock struct {
+	Header        *BlockHeader
+	BlsMessages   []*Message
+	SecpkMessages []*SignedMessage
+}
+
+func DecodeBlockHeader(b []byte) (*BlockHeader, error) {
 	var bh BlockHeader
 	if err := bh.UnmarshalCBOR(bytes.NewReader(b)); err != nil {
 		return nil, err
@@ -209,4 +220,13 @@ func CidArrsEqual(a, b []cid.Cid) bool {
 		}
 	}
 	return true
+}
+
+var DefaultHashFunction = uint64(mh.BLAKE2B_MIN + 31)
+
+var MessageCidPrefix = cid.Prefix{
+	Version:  1,
+	Codec:    cid.DagCBOR,
+	MhType:   DefaultHashFunction,
+	MhLength: 32,
 }

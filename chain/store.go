@@ -3,8 +3,9 @@ package chain
 import (
 	"context"
 	"fmt"
+	"sync"
 
-	"github.com/go-logr/logr"
+	block "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
@@ -14,11 +15,50 @@ var genesisKey = datastore.NewKey("0")
 
 type Blockstore interface {
 	blockstore.Viewer
+
+	Has(cid.Cid) (bool, error)
+
+	Get(cid.Cid) (block.Block, error)
+	GetSize(cid.Cid) (int, error)
+
+	Put(block.Block) error
+	PutMany(bs []block.Block) error
+
+	DeleteBlock(cid.Cid) error
 }
 
 type Store struct {
 	blocks Blockstore
-	logger logr.Logger
+
+	heaviestMu sync.Mutex
+	heaviest   *TipSet
+}
+
+func (s *Store) PutBlockHeader(bh *BlockHeader) error {
+	b, err := EncodeAsBlock(bh)
+	if err != nil {
+		return fmt.Errorf("encode block header: %w", err)
+	}
+
+	return s.blocks.Put(b)
+}
+
+func (s *Store) PutManyBlockHeaders(bhs []*BlockHeader) error {
+	bs := make([]block.Block, 0, len(bhs))
+	for _, bh := range bhs {
+		b, err := EncodeAsBlock(bh)
+		if err != nil {
+			return fmt.Errorf("encode block header: %w", err)
+		}
+		bs = append(bs, b)
+	}
+	return s.blocks.PutMany(bs)
+}
+
+func (s *Store) HeaviestTipSet() *TipSet {
+	s.heaviestMu.Lock()
+	defer s.heaviestMu.Unlock()
+	return s.heaviest
 }
 
 // func (s *Store) SetGenesis(ctx context.Context, b *BlockHeader) error {
@@ -51,7 +91,7 @@ type Store struct {
 func (s *Store) GetBlockHeader(ctx context.Context, c cid.Cid) (*BlockHeader, error) {
 	var bh *BlockHeader
 	err := s.blocks.View(c, func(b []byte) (err error) {
-		bh, err = DecodeBlock(b)
+		bh, err = DecodeBlockHeader(b)
 		return fmt.Errorf("decode block: %w", err)
 	})
 	return bh, err
