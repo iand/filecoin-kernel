@@ -72,6 +72,15 @@ func (bh *BlockHeader) Cid() (cid.Cid, error) {
 	return c, nil
 }
 
+func DecodeBlock(b []byte) (*BlockHeader, error) {
+	var bh BlockHeader
+	if err := bh.UnmarshalCBOR(bytes.NewReader(b)); err != nil {
+		return nil, err
+	}
+
+	return &bh, nil
+}
+
 type BeaconEntry struct {
 	Round uint64
 	Data  []byte

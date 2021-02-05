@@ -11,13 +11,16 @@ require (
 	github.com/filecoin-project/specs-actors/v3 v3.0.0
 	github.com/go-logr/logr v0.3.0
 	github.com/ipfs/go-cid v0.0.7
+	github.com/ipfs/go-datastore v0.4.5
+	github.com/ipfs/go-ipfs-blockstore v1.0.3
 	github.com/ipfs/go-ipfs-util v0.0.2 // indirect
 	github.com/ipfs/go-ipld-cbor v0.0.5
 	github.com/ipfs/go-ipld-format v0.2.0 // indirect
 	github.com/ipfs/go-log/v2 v2.1.1 // indirect
 	github.com/libp2p/go-libp2p-core v0.8.0
+	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
-	github.com/multiformats/go-multiaddr v0.3.1 // indirect
+	github.com/multiformats/go-multiaddr v0.3.1
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/smartystreets/goconvey v1.6.4 // indirect

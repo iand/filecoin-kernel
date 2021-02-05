@@ -10,7 +10,7 @@ import (
 	// "github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/cbor"
 	"github.com/filecoin-project/go-state-types/exitcode"
-	"github.com/filecoin-project/go-state-types/network"
+	// "github.com/filecoin-project/go-state-types/network"
 	// "github.com/filecoin-project/go-state-types/rt"
 	// "github.com/filecoin-project/specs-actors/v3/actors/builtin"
 	// init_ "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
@@ -18,19 +18,9 @@ import (
 	"github.com/ipfs/go-cid"
 	// ipldcbor "github.com/ipfs/go-ipld-cbor"
 
-	"github.com/iand/filecoin-kernel/gas"
+	// "github.com/iand/filecoin-kernel/gas"
+	"github.com/iand/filecoin-kernel/networks"
 )
-
-type Network interface {
-	// Pricelist finds the latest prices for the given epoch
-	Pricelist(epoch abi.ChainEpoch) gas.Pricelist
-
-	// Version returns the network version for the given epoch
-	Version(epoch abi.ChainEpoch) network.Version
-
-	// ActorsVersion returns the version of actors adt for the given epoch
-	ActorsVersion(epoch abi.ChainEpoch) int
-}
 
 var ErrActorNotFound = errors.New("actor not found")
 
@@ -55,12 +45,12 @@ type Message struct {
 type VM struct {
 	store        *ActorStore
 	currentEpoch abi.ChainEpoch
-	network      Network
+	network      networks.Network
 
 	emptyObject cid.Cid
 }
 
-func NewVM(store *ActorStore, epoch abi.ChainEpoch, network Network) (*VM, error) {
+func NewVM(store *ActorStore, epoch abi.ChainEpoch, network networks.Network) (*VM, error) {
 	emptyObject, err := store.states.Put(context.TODO(), []struct{}{})
 	if err != nil {
 		return nil, err

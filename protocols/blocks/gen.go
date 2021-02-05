@@ -8,13 +8,12 @@ import (
 
 	gen "github.com/whyrusleeping/cbor-gen"
 
-	"github.com/iand/filecoin-kernel/protocols/hello"
+	"github.com/iand/filecoin-kernel/protocols/blocks"
 )
 
 func main() {
-	err := gen.WriteTupleEncodersToFile("cbor_gen.go", "hello",
-		hello.HelloMessage{},
-		hello.LatencyMessage{},
+	err := gen.WriteTupleEncodersToFile("cbor_gen.go", "blocks",
+		blocks.BlockMessage{},
 	)
 	if err != nil {
 		fmt.Println(err)

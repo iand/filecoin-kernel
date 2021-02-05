@@ -108,6 +108,9 @@ func Send(ctx context.Context, h host.Host, req *Request) (*Response, error) {
 		return nil, fmt.Errorf("peer: failed to get protocols for peer: %w", err)
 	}
 
+	protocols, _ := h.Peerstore().GetProtocols(req.PeerID)
+	fmt.Printf("protocols: %q\n", protocols)
+
 	if len(supported) == 0 {
 		return nil, fmt.Errorf("peer: does not support protocols")
 	}

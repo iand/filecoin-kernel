@@ -18,15 +18,16 @@ import (
 	"github.com/filecoin-project/go-state-types/exitcode"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/filecoin-project/go-state-types/rt"
-	"github.com/ipfs/go-cid"
-	"github.com/pkg/errors"
-
 	"github.com/filecoin-project/specs-actors/v3/actors/builtin"
 	init_ "github.com/filecoin-project/specs-actors/v3/actors/builtin/init"
 	"github.com/filecoin-project/specs-actors/v3/actors/runtime"
 	"github.com/filecoin-project/specs-actors/v3/actors/runtime/proof"
 	"github.com/filecoin-project/specs-actors/v3/actors/util/adt"
 	"github.com/filecoin-project/specs-actors/v3/support/testing"
+	"github.com/ipfs/go-cid"
+	"github.com/pkg/errors"
+
+	"github.com/iand/filecoin-kernel/networks"
 )
 
 func IsSingletonActor(act rt.VMActor) bool {
@@ -88,7 +89,7 @@ type topLevelContext struct {
 	originatorStableAddress address.Address // Stable (public key) address of the top-level message sender.
 	originatorCallSeq       uint64          // Call sequence number of the top-level message.
 	newActorAddressCount    uint64          // Count of calls to NewActorAddress (mutable).
-	network                 Network
+	network                 networks.Network
 	currentEpoch            abi.ChainEpoch
 }
 

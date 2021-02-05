@@ -8,7 +8,7 @@ import (
 
 	gen "github.com/whyrusleeping/cbor-gen"
 
-	"github.com/iand/filecoin-kernel/chainexchange"
+	"github.com/iand/filecoin-kernel/protocols/chainexchange"
 )
 
 func main() {
