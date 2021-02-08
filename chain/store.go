@@ -1,14 +1,18 @@
 package chain
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
+	"github.com/filecoin-project/go-state-types/cbor"
 	block "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	"github.com/ipld/go-car"
 )
 
 var genesisKey = datastore.NewKey("0")
@@ -27,20 +31,41 @@ type Blockstore interface {
 	DeleteBlock(cid.Cid) error
 }
 
+type Metastore interface {
+	datastore.Write
+	Get(key datastore.Key) (value []byte, err error)
+}
+
 type Store struct {
 	blocks Blockstore
+	meta   Metastore
 
 	heaviestMu sync.Mutex
 	heaviest   *TipSet
 }
 
-func (s *Store) PutBlockHeader(bh *BlockHeader) error {
-	b, err := EncodeAsBlock(bh)
+func NewStore(blocks Blockstore, meta Metastore) (*Store, error) {
+	return &Store{
+		blocks: blocks,
+		meta:   meta,
+	}, nil
+}
+
+func (s *Store) PutCbor(ctx context.Context, v cbor.Marshaler) (cid.Cid, error) {
+	b, err := EncodeAsBlock(v)
 	if err != nil {
-		return fmt.Errorf("encode block header: %w", err)
+		return cid.Undef, fmt.Errorf("encode as block: %w", err)
 	}
 
-	return s.blocks.Put(b)
+	if err := s.blocks.Put(b); err != nil {
+		return cid.Undef, fmt.Errorf("put: %w", err)
+	}
+
+	return b.Cid(), nil
+}
+
+func (s *Store) PutBlockHeader(ctx context.Context, bh *BlockHeader) (cid.Cid, error) {
+	return s.PutCbor(ctx, bh)
 }
 
 func (s *Store) PutManyBlockHeaders(bhs []*BlockHeader) error {
@@ -55,103 +80,96 @@ func (s *Store) PutManyBlockHeaders(bhs []*BlockHeader) error {
 	return s.blocks.PutMany(bs)
 }
 
-func (s *Store) HeaviestTipSet() *TipSet {
-	s.heaviestMu.Lock()
-	defer s.heaviestMu.Unlock()
-	return s.heaviest
-}
-
-// func (s *Store) SetGenesis(ctx context.Context, b *BlockHeader) error {
-// 	ts, err := NewTipSet([]*BlockHeader{b})
-// 	if err != nil {
-// 		return fmt.Errorf("new tipset: %w", err)
-// 	}
-
-// 	if err := cs.PutTipSet(ctx, ts); err != nil {
-// 		return fmt.Errorf("put tipset: %w", err)
-// 	}
-
-// 	return cs.ds.Put(genesisKey, b.Cid().Bytes())
-// }
-
-// func (s *Store) GetGenesis() (*BlockHeader, error) {
-// 	data, err := s.ds.Get(genesisKey)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get genesis cid: %w", err)
-// 	}
-
-// 	c, err := cid.Cast(data)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	return s.GetBlock(c)
-// }
-
 func (s *Store) GetBlockHeader(ctx context.Context, c cid.Cid) (*BlockHeader, error) {
 	var bh *BlockHeader
 	err := s.blocks.View(c, func(b []byte) (err error) {
 		bh, err = DecodeBlockHeader(b)
-		return fmt.Errorf("decode block: %w", err)
+		if err != nil {
+			return fmt.Errorf("decode block: %w", err)
+		}
+		return nil
 	})
 	return bh, err
 }
 
-// func (s *Store) PutTipSet(ctx context.Context, ts *TipSet) error {
-// 	for _, b := range ts.Blocks() {
-// 		if err := cs.PersistBlockHeaders(b); err != nil {
-// 			return err
-// 		}
-// 	}
+func (s *Store) GetMessage(ctx context.Context, c cid.Cid) (*Message, error) {
+	var msg *Message
+	err := s.blocks.View(c, func(b []byte) (err error) {
+		return msg.UnmarshalCBOR(bytes.NewReader(b))
+	})
+	return msg, err
+}
 
-// 	expanded, err := cs.expandTipset(ts.Blocks()[0])
-// 	if err != nil {
-// 		return xerrors.Errorf("errored while expanding tipset: %w", err)
-// 	}
-// 	log.Debugf("expanded %s into %s\n", ts.Cids(), expanded.Cids())
+func (s *Store) PutMessage(ctx context.Context, msg *Message) (cid.Cid, error) {
+	return s.PutCbor(ctx, msg)
+}
 
-// 	if err := cs.MaybeTakeHeavierTipSet(ctx, expanded); err != nil {
-// 		return xerrors.Errorf("MaybeTakeHeavierTipSet failed in PutTipSet: %w", err)
-// 	}
-// 	return nil
-// }
+func (s *Store) GetSignedMessage(ctx context.Context, c cid.Cid) (*SignedMessage, error) {
+	var msg *SignedMessage
+	err := s.blocks.View(c, func(b []byte) (err error) {
+		return msg.UnmarshalCBOR(bytes.NewReader(b))
+	})
+	return msg, err
+}
 
-// func (s *Store) expandTipset(b *types.BlockHeader) (*types.TipSet, error) {
-// 	// Hold lock for the whole function for now, if it becomes a problem we can
-// 	// fix pretty easily
-// 	cs.tstLk.Lock()
-// 	defer cs.tstLk.Unlock()
+func (s *Store) PutSignedMessage(ctx context.Context, msg *SignedMessage) (cid.Cid, error) {
+	return s.PutCbor(ctx, msg)
+}
 
-// 	all := []*types.BlockHeader{b}
+func (s *Store) LoadTipSet(ctx context.Context, cids []cid.Cid) (*TipSet, error) {
+	bhs := make([]*BlockHeader, 0, len(cids))
+	for _, c := range cids {
+		bh, err := s.GetBlockHeader(ctx, c)
+		if err != nil {
+			return nil, fmt.Errorf("get block header: %w", err)
+		}
+		bhs = append(bhs, bh)
+	}
 
-// 	tsets, ok := cs.tipsets[b.Height]
-// 	if !ok {
-// 		return types.NewTipSet(all)
-// 	}
+	return NewTipSet(bhs)
+}
 
-// 	inclMiners := map[address.Address]cid.Cid{b.Miner: b.Cid()}
-// 	for _, bhc := range tsets {
-// 		if bhc == b.Cid() {
-// 			continue
-// 		}
+func (s *Store) Import(ctx context.Context, r io.Reader) (*TipSet, error) {
+	header, err := car.LoadCar(s.blocks, r)
+	if err != nil {
+		return nil, fmt.Errorf("load car: %w", err)
+	}
 
-// 		h, err := cs.GetBlock(bhc)
-// 		if err != nil {
-// 			return nil, xerrors.Errorf("failed to load block (%s) for tipset expansion: %w", bhc, err)
-// 		}
+	root, err := s.LoadTipSet(ctx, header.Roots)
+	if err != nil {
+		return nil, fmt.Errorf("load root tipset: %w", err)
+	}
 
-// 		if cid, found := inclMiners[h.Miner]; found {
-// 			log.Warnf("Have multiple blocks from miner %s at height %d in our tipset cache %s-%s", h.Miner, h.Height, h.Cid(), cid)
-// 			continue
-// 		}
+	return root, nil
+}
 
-// 		if types.CidArrsEqual(h.Parents, b.Parents) {
-// 			all = append(all, h)
-// 			inclMiners[h.Miner] = bhc
-// 		}
-// 	}
+func (s *Store) GetGenesis(ctx context.Context) (cid.Cid, error) {
+	data, err := s.meta.Get(genesisKey)
+	if err != nil {
+		return cid.Undef, err
+	}
 
-// 	// TODO: other validation...?
+	c, err := cid.Cast(data)
+	if err != nil {
+		return cid.Undef, err
+	}
 
-// 	return types.NewTipSet(all)
-// }
+	return c, nil
+}
+
+func (s *Store) SetGenesis(ctx context.Context, c cid.Cid) error {
+	return s.meta.Put(genesisKey, c.Bytes())
+}
+
+func (s *Store) HeaviestTipSet(ctx context.Context) (*TipSet, error) {
+	s.heaviestMu.Lock()
+	defer s.heaviestMu.Unlock()
+	return s.heaviest, nil
+}
+
+func (s *Store) SetHeaviestTipSet(ctx context.Context, ts *TipSet) error {
+	s.heaviestMu.Lock()
+	defer s.heaviestMu.Unlock()
+	s.heaviest = ts
+	return nil
+}

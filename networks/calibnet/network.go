@@ -1,6 +1,9 @@
 package calibnet
 
 import (
+	"bytes"
+	"io"
+
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -35,4 +38,8 @@ func (n *netwrk) BootstrapPeers() []peer.AddrInfo {
 
 func (n *netwrk) BlockMessageLimit() int {
 	return 10000
+}
+
+func (n *netwrk) GenesisData() io.Reader {
+	return bytes.NewReader(genesisBytes)
 }

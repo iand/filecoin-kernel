@@ -48,6 +48,9 @@ func (ci *cidIndex) Index(c cid.Cid) (int, bool) {
 }
 
 func fetchFullBlock(ctx context.Context, from peer.ID, bsrv bserv.BlockService, bm *blocks.BlockMessage) (*chain.FullBlock, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("fetching all message for full block")
+
 	session := bserv.NewSession(ctx, bsrv)
 
 	bCidIndex, err := newCidIndex(bm.BlsMessages)

@@ -1,6 +1,8 @@
 package networks
 
 import (
+	"io"
+
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -24,4 +26,6 @@ type Network interface {
 
 	// Maximum number of blocks per message
 	BlockMessageLimit() int
+
+	GenesisData() io.Reader
 }

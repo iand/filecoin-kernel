@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-logr/logr"
 	bserv "github.com/ipfs/go-blockservice"
+	"github.com/libp2p/go-eventbus"
+	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -14,6 +16,7 @@ import (
 	"github.com/iand/filecoin-kernel/chain"
 	"github.com/iand/filecoin-kernel/networks"
 	"github.com/iand/filecoin-kernel/protocols/blocks"
+	"github.com/iand/filecoin-kernel/protocols/hello"
 	"github.com/iand/filecoin-kernel/protocols/messages"
 )
 
@@ -49,7 +52,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	})
 
 	g.Go(func() error {
-		return c.pubsubMessages(ctx, ps)
+		return c.hello(ctx)
 	})
 
 	return g.Wait()
@@ -72,7 +75,11 @@ func (c *Coordinator) AddPotentialHead(ctx context.Context, pid peer.ID, fts *ch
 
 	// TODO: add peer to chain exchange list
 
-	hts := c.cs.HeaviestTipSet()
+	hts, err := c.cs.HeaviestTipSet(ctx)
+	if err != nil {
+		return fmt.Errorf("heaviest tipset: %w", err)
+	}
+
 	bestParentWeight := hts.Blocks[0].ParentWeight
 	potentialParentWeight := fts.Blocks[0].Header.ParentWeight
 
@@ -127,6 +134,8 @@ func (c *Coordinator) pubsubBlocks(ctx context.Context, ps *pubsub.PubSub) error
 				return
 			}
 
+			logger.Info("block header", "height", bm.Header.Height, "parent_state_root", bm.Header.ParentStateRoot, "miner", bm.Header.Miner)
+
 			fb, err := fetchFullBlock(ctx, msg.ReceivedFrom, c.bsrv, bm)
 			if err != nil {
 				logger.Error(err, "add block to coordinator")
@@ -163,4 +172,89 @@ func (c *Coordinator) pubsubMessages(ctx context.Context, ps *pubsub.PubSub) err
 	}
 
 	return nil
+}
+
+func (c *Coordinator) hello(ctx context.Context) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	greetings := make(chan hello.ReceivedHello)
+	c.host.SetStreamHandler(hello.ProtocolID, hello.NewStreamHandler(greetings, logger))
+
+	sub, err := c.host.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(1024))
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to event bus: %w", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case evt := <-sub.Out():
+			// Connected to a new peer
+
+			pic := evt.(event.EvtPeerIdentificationCompleted)
+			if err := c.sayHello(ctx, pic.Peer); err != nil {
+				protos, _ := c.host.Peerstore().GetProtocols(pic.Peer)
+				agent, _ := c.host.Peerstore().Get(pic.Peer, "AgentVersion")
+				if stringSliceContains(protos, hello.ProtocolID) {
+					logger.Info("failed to say hello", "error", err, "peer", pic.Peer, "supported", protos, "agent", agent)
+				} else {
+					logger.V(1).Info("failed to say hello", "error", err, "peer", pic.Peer, "supported", protos, "agent", agent)
+				}
+			}
+
+		case hmsg := <-greetings:
+			// Received a hello message from a peer
+
+			logger.Info("incoming hello message", "tipset", hmsg.Message.HeaviestTipSet, "height", hmsg.Message.HeaviestTipSetHeight, "weight", hmsg.Message.HeaviestTipSetWeight, "peer", hmsg.PeerID, "hash", hmsg.Message.GenesisHash)
+
+		}
+	}
+
+	return nil
+}
+
+func (c *Coordinator) sayHello(ctx context.Context, pid peer.ID) error {
+	logger := logr.FromContextOrDiscard(ctx).WithValues("peer", pid)
+
+	logger.Info("saying hello")
+
+	genHash, err := c.cs.GetGenesis(ctx)
+	if err != nil {
+		return fmt.Errorf("get genesis: %w", err)
+	}
+
+	hts, err := c.cs.HeaviestTipSet(ctx)
+	if err != nil {
+		return fmt.Errorf("heaviest tipset: %w", err)
+	}
+
+	req := &hello.Request{
+		PeerID: pid,
+		Message: hello.HelloMessage{
+			HeaviestTipSet:       hts.Cids,
+			HeaviestTipSetHeight: hts.Blocks[0].Height,
+			HeaviestTipSetWeight: hts.Blocks[0].ParentWeight,
+			GenesisHash:          genHash,
+		},
+	}
+
+	resp, err := hello.Send(ctx, c.host, req)
+	if err != nil {
+		return fmt.Errorf("send hello message: %w", err)
+	}
+
+	if resp != nil {
+		logger.Info("hello reported latency", "arrival", resp.Message.TArrival, "sent", resp.Message.TSent)
+	}
+	return nil
+}
+
+func stringSliceContains(haystack []string, needle string) bool {
+	for _, p := range haystack {
+		if p == needle {
+			return true
+		}
+	}
+	return false
 }

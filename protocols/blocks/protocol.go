@@ -67,7 +67,7 @@ func (v *BlockValidator) Validate(ctx context.Context, pid peer.ID, msg *pubsub.
 		return pubsub.ValidationReject
 	}
 
-	msg.ValidatorData = bm
+	msg.ValidatorData = &bm
 	return pubsub.ValidationAccept
 }
 

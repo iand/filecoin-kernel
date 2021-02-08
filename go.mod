@@ -3,6 +3,7 @@ module github.com/iand/filecoin-kernel
 go 1.16
 
 require (
+	github.com/GeertJohan/go.rice v1.0.2
 	github.com/filecoin-project/go-address v0.0.5-0.20201103152444-f2023ef3f5bb
 	github.com/filecoin-project/go-bitfield v0.2.3-0.20201110211213-fe2c1862e816 // indirect
 	github.com/filecoin-project/go-cbor-util v0.0.0-20201016124514-d0bbec7bfcc4
@@ -19,6 +20,8 @@ require (
 	github.com/ipfs/go-ipld-cbor v0.0.5
 	github.com/ipfs/go-ipld-format v0.2.0 // indirect
 	github.com/ipfs/go-log/v2 v2.1.1 // indirect
+	github.com/ipld/go-car v0.1.0
+	github.com/libp2p/go-eventbus v0.2.1
 	github.com/libp2p/go-libp2p-core v0.8.0
 	github.com/libp2p/go-libp2p-pubsub v0.4.1
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1

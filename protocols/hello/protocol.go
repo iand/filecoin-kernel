@@ -55,7 +55,7 @@ func Send(ctx context.Context, h host.Host, req *Request) (*Response, error) {
 	defer s.Close()
 
 	_ = s.SetWriteDeadline(req.WriteDeadline)
-	if err := cborutil.WriteCborRPC(s, req.Message); err != nil {
+	if err := cborutil.WriteCborRPC(s, &req.Message); err != nil {
 		return nil, fmt.Errorf("write to peer: %w", err)
 	}
 	_ = s.SetWriteDeadline(time.Time{})
